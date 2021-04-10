@@ -1,0 +1,3 @@
+#!/bin/sh
+
+./Space-Invaders-Emu rom &> log

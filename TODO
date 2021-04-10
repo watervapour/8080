@@ -1,0 +1,13 @@
+register display
+debug opcodes
+
+
+=== continue guide  ===
+input
+audio
+
+
+============
+FE 40
+acted like a cp 
+should be compare PC+1 to set flags

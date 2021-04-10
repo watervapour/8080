@@ -1,0 +1,3 @@
+mem rendering:
+	- make each line its own rect, might make optomising easy
+	- 0xF or 0x20 entries wide
