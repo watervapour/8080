@@ -9,7 +9,7 @@ i8080::i8080(){
 
 	//register
 	A = B = C = D = E = H = L = 0;
-	flags.Z = flags.S = flags.P = flags.CY = flags.AC = 0;
+	flags.S = flags.Z = flags.AC = flags.P = flags.CY = 0;
 
 	opcode = opcodeCycleCount = 0;	
 
@@ -56,15 +56,27 @@ bool i8080::loadROM(const char* path){
 }
 
 void i8080::emulateCycle(){
-
+	// will need to check for interrupts, disabled for early bugfixing
+	if(INT){
+		writeMem( (SP-1), (PC & 0xFF00) >> 8);
+		writeMem( (SP-2), (PC & 0x00FF));
+		SP -= 2;
+		(this->*opcodeArray[dataBus])();
+	}
 	// XXX 1==1 to override the cycle count aspect
-	if(opcodeCycleCount <= 0 | 1==1){
+	if(opcodeCycleCount <= 0 | 1==1 & !hold){
 		opcode = memory[PC];
 		printf("PC: %X | OP: %X\n",PC, opcode);
 		(this->*opcodeArray[opcode])();
 	}
 	opcodeCycleCount -= 1;
 }
+
+void i8080::signalInt(){
+	INT = true;
+}
+
+
 
 /* returns byte (8 pixels of graphics)
 @param index: the element within the gfx array to read
@@ -168,15 +180,15 @@ uint8_t i8080::fetchRAM(uint16_t address){
 */
 
 uint8_t i8080::readPSW(){
-	return (flags.Z << 7) | (flags.S << 6) | (flags.P << 5) | (flags.CY << 4) | (flags.AC << 3);
+	return (flags.S << 7) | (flags.Z << 6) | (flags.AC << 4) | (flags.P << 2) | (flags.CY);
 }
 
 void i8080::writePSW(uint8_t data){
-	flags.Z = data & 0x80;
-	flags.S = data & 0x40;
-	flags.P = data & 0x20;
-	flags.CY = data & 0x10;
-	flags.AC = data & 0x08;
+	flags.S = data & 0x80;
+	flags.Z = data & 0x40;
+	flags.AC = data & 0x10;
+	flags.P = data & 0x04;
+	flags.CY = data & 0x01;
 }
 
 /* returns 16bit value, which is formed from pairs of register
@@ -186,7 +198,7 @@ void i8080::writePSW(uint8_t data){
 	M: HL
 */
 uint16_t i8080::readRegisterPair(char pairID){
-	uint8_t upperByte, lowerByte;//XXX issues with shifting 8 bit into bits XXXX0000?
+	uint8_t upperByte, lowerByte;
 	switch(pairID){
 	
 	case 'B':
@@ -201,6 +213,8 @@ uint16_t i8080::readRegisterPair(char pairID){
 		upperByte = H;
 		lowerByte = L;
 		break;
+	case 'S': //already 16 so no shifting necessary, used in 0x3B
+		return SP;
 
 	}
 	return ((upperByte << 8) | lowerByte);
@@ -229,6 +243,9 @@ void i8080::writeRegisterPair(char pairID, uint16_t value){
 		H = upperByte;
 		L = lowerByte;
 		break;
+	case 'S':
+		SP = value;
+		break;
 	}
 }
 
@@ -245,7 +262,7 @@ void i8080::writeRegisterPair(char pairID, uint16_t value){
 	111: register A (accumulator) 
 */
 uint8_t* i8080::opcodeDecodeRegisterBits(uint8_t bits){
-	switch (bits & 0x07) {
+	switch (bits & 0b111) {
 
 	case 0b000:
 		return &B;
@@ -260,7 +277,6 @@ uint8_t* i8080::opcodeDecodeRegisterBits(uint8_t bits){
 	case 0b101:
 		return &L;
 	case 0b110:
-		//return &(memory[((H << 4) & L)]);
 		return &(memory[readRegisterPair('H')]);
 	case 0b111:
 		return &A;
@@ -272,20 +288,13 @@ uint8_t* i8080::opcodeDecodeRegisterBits(uint8_t bits){
 // updates flags
 // XXX AC unimplemented, not used in space invaders
 void i8080::updateFlags(const uint8_t& value){
-	printf("value = %X\n", value);
-	flags.Z = (value == 0);	
 	flags.S = (value & 0x80);
-	flags.P = parityCheck(value);
-	flags.AC = 0; 
-}
-// checks if there are an equal number of 1's and 0's 
-// XXX does this need to check register pairs (non 1 byte) 
-bool i8080::parityCheck(const uint8_t& reg){
+	flags.Z = (value == 0);	
 	uint8_t ones = 0;
 	for(int shift = 0; shift < 8; ++shift){
-		if((reg >> shift) & 0x01){ ++ones; }
+		if((value >> shift) & 0x01){ ++ones; }
 	}
-	return (ones == 4);
+	flags.P = (ones == 4);
 }
 
 // safely writes to RAM/GFX
@@ -321,7 +330,7 @@ void i8080::INX(char ID){
 	PC += 1;
 	opcodeCycleCount = 5;
 }
-// generic INR | adds one to a register, and alters Z, S, P, AC flags
+// generic INR | adds one to a register, and alters S, Z, AC, P flags
 void i8080::INR(uint8_t& reg){
 	reg +=1;
 	updateFlags(reg);	
@@ -329,7 +338,7 @@ void i8080::INR(uint8_t& reg){
 	opcodeCycleCount = 5;
 }
 
-// generic DCR | adds one to a register, and alters Z, S, P, AC flags
+// generic DCR | subs one to a register, and alters S, Z, AC, P flags
 void i8080::DCR(uint8_t& reg){
 	reg -= 1;
 	updateFlags(reg);	
@@ -344,40 +353,60 @@ void i8080::MVI(uint8_t& reg){
 	opcodeCycleCount = 7;
 }
 
-// generic POP | fetches data from the stack, at SP (SP points to top filled stack slot)
+// generic DAD | add register pair (or SP) onto HL
+void i8080::DAD(char ID){
+	uint32_t result = readRegisterPair('H') + readRegisterPair(ID);
+	writeRegisterPair('H', result);
+	flags.CY = result >= 0x00010000;
+	PC += 1;
+ 	opcodeCycleCount = 10;
+}
+
+// generic DCX | decrement register pair (or SP) by 1
+void i8080::DCX(char ID){
+	uint16_t result = readRegisterPair(ID) - 1;
+	writeRegisterPair(ID, result);
+	PC += 1;
+	opcodeCycleCount = 5;
+}
+
+// generic POP | fetches data from the stack, at SP (SP points to lowest filled stack slot)
 uint16_t  i8080::POP(){
 	uint16_t value = (memory[SP + 1] << 8) | memory[SP];
-	SP += 1;
+	SP += 2;
 	PC += 1;
 	opcodeCycleCount = 10;
 	return value;
 }
 
 //generic JUMP | grabs 2 bytes after PC and set the PC to that address
-// XXX does auto pc increment mess with this?
-// XXX issues with cyclecount for failed jumps should be handled here?
-void i8080::JUMP(){
+void i8080::JUMP(bool condition){
+	if(condition){
 	uint16_t address = (memory[PC+2] << 8) | memory[PC+1];
-	PC = address;
+		PC = address;
+	} else {
+		PC += 3;
+	}
 	opcodeCycleCount = 10;
 }
 
 // generic CALL | pushes PC, then sets PC
 void i8080::genericCALL(bool condition){
 	if(condition){
-		PUSH(PC);
+		writeMem( (SP-1), ((PC + 3) & 0xFF00) >> 8);
+		writeMem( (SP-2), ((PC + 3) & 0x00FF));
+		SP -= 2;
 		PC = (memory[PC+2]) << 8 | memory[PC+1];
-		//printf("GC caled: %X\n", PC);
 		opcodeCycleCount = 17;
 	} else {
-		PC += 1;
+		PC += 3;
 		opcodeCycleCount = 11;
 	}
 }
 
 // generic PUSH | places 2 bytes onto the stack, then decrements SP
 void i8080::PUSH(uint16_t value){
-	writeMem( (SP-1), (value & 0xFF00));
+	writeMem( (SP-1), (value & 0xFF00) >> 8);
 	writeMem( (SP-2), (value & 0x00FF));
 	SP -= 2;
 	PC += 1; 
@@ -387,9 +416,9 @@ void i8080::PUSH(uint16_t value){
 // generic RESET | behaves like call (saves pc to stack), but jumps to a specified number
 //XXX pc auto issues?
 void i8080::RESET(uint16_t callAddress){
-	writeMem( (SP-1), (PC >> 8));
-	writeMem( (SP-2), (PC));
-
+	writeMem( (SP-1), ((PC + 1) >> 8));
+	writeMem( (SP-2), (PC + 1));
+	SP -= 2;
 	PC = callAddress;
 	opcodeCycleCount = 11;
 }
@@ -420,7 +449,8 @@ void i8080::LXIB(){
 // 0x02 | Write A to mem at address BC 
 void i8080::STAXB(){
 	writeMem(readRegisterPair('B'), A);		
-	opcodeCycleCount = 1;
+	PC += 1;
+	opcodeCycleCount = 7;
 }
 
 // 0x03 | Increase the B register pair
@@ -428,12 +458,12 @@ void i8080::INXB(){
 	INX('B');
 }
 
-// 0x04 | adds one to B and alters Z, S, P, AC flags
+// 0x04 | adds one to B and alters S, Z, AC, P flags
 void i8080::INRB(){
 	INR(B);
 }
 
-// 0x05 | subtracts one from B and alters Z, S, P, AC flags
+// 0x05 | subtracts one from B and alters S, Z, AC, P flags
 void i8080::DCRB(){
 	DCR(B);
 }
@@ -445,21 +475,19 @@ void i8080::MVIB(){
 
 // 0x07 | bit shift A left, bit 0 & Cy = prev bit 7
 void i8080::RLC(){
-	uint8_t bit0 = (A & 0x01);
+	uint8_t oldBit7 = (A & 0x80)>>7;
 	A <<= 1;
-	A = A | bit0;
-	flags.CY = (1 == (bit0 & 0x01));
+	A = A | oldBit7;
+	flags.CY = (1 == oldBit7);
 	PC += 1;
 	opcodeCycleCount = 4;
 }
 
+//0x08 | unused NOP (0x00)
+
 // 0x09 | adds BC onto HL
 void i8080::DADB(){
-	uint32_t result = readRegisterPair('H') + readRegisterPair('B');
-	writeRegisterPair('H', result);
-	flags.CY = (result & 0xFFFF0000) > 0;
-	PC += 1;
- 	opcodeCycleCount = 10;
+	DAD('B');
 }
 
 // 0x0A | set register A to the contents or memory pointed by BC
@@ -471,13 +499,10 @@ void i8080::LDAXB(){
 
 // 0x0B | decrease B pair by 1
 void i8080::DCXB(){
-	uint16_t result = readRegisterPair('B') - 1;
-	writeRegisterPair('B', result);
-	PC += 1;
-	opcodeCycleCount = 5;
+	DCX('B');
 }
 
-// 0x0C | increases register C by 1, alters Z, S, P, AC flags
+// 0x0C | increases register C by 1, alters S, Z, AC, P flags
 void i8080::INRC(){
 	INR(C);
 }
@@ -492,12 +517,12 @@ void i8080::MVIC(){
 	MVI(C);
 }
 
-// 0x0F | rotates A right 1, bit 7 & CY = prev bit 7
+// 0x0F | rotates A right 1, bit 7 & CY = prev bit 0
 void i8080::RRC(){
-	uint8_t bit7 = (A & 0x80);
+	uint8_t oldBit0 = (A & 0x01);
 	A >>= 1;
-	A = A | bit7;
-	flags.CY = (1 == (bit7 & 0x80));
+	A = A | (oldBit0 << 7);
+	flags.CY = (0x01 == oldBit0);
 	PC += 1;
 	opcodeCycleCount = 4;
 }
@@ -512,8 +537,9 @@ void i8080::LXID(){
 // 0x12 | stores A into the address pointed to by the D reg pair
 // XXX no opcode count for stax
 void i8080::STAXD(){
-	writeMem(readRegisterPair('B'), A);		
-	opcodeCycleCount = 1;
+	writeMem(readRegisterPair('D'), A);		
+	PC += 1;
+	opcodeCycleCount = 7;
 }
 
 // 0x13 | increases the D reg pair by one
@@ -542,7 +568,7 @@ void i8080::RAL(){
 	uint8_t oldA = A;
 	A <<= 1;
 	A = A | ((flags.CY)? 0x01 : 0x00);
-	flags.CY = (1 == (oldA & 0x80));
+	flags.CY = (0x80 == (oldA & 0x80));
 	PC += 1;
 	opcodeCycleCount = 4;
 }
@@ -551,11 +577,7 @@ void i8080::RAL(){
 
 // 0x19 | add reg pair D onto reg pair H
 void i8080::DADD(){
-	uint32_t result = readRegisterPair('H') + readRegisterPair('D');
-	writeRegisterPair('B', result);
-	flags.CY = (result & 0xFFFF0000) > 0;
-	PC += 1;
- 	opcodeCycleCount = 10;
+	DAD('D');
 }
 
 // 0x1A | store the value at the memory referenced by DE in A
@@ -567,10 +589,7 @@ void i8080::LDAXD(){
 
 // 0x1B | decrease DE pair by 1
 void i8080::DCXD(){
-	uint16_t result = readRegisterPair('D') - 1;
-	writeRegisterPair('D', result);
-	PC += 1;
-	opcodeCycleCount = 5;
+	DCX('D');
 }
 
 // 0x1C | increase reg E by 1
@@ -588,12 +607,12 @@ void i8080::MVIE(){
 	MVI(E);
 }
 
-// 0x1F | rotate A right one, bit 7 = prev bit 7, CY = prevbit0
+// 0x1F | rotate A right one, bit 7 = prev CY, CY = prevbit0
 void i8080::RAR(){
 	uint8_t oldA = A;
 	A >>= 1;
-	A = A | (oldA & 0x80);
-	flags.CY = (1 == (oldA & 0x01));
+	A = A | ((flags.CY)? 0x80 : 0x00);
+	flags.CY = (0x01 == (oldA & 0x01));
 	PC += 1;
 	opcodeCycleCount = 4;
 }
@@ -608,7 +627,7 @@ void i8080::LXIH(){
 // 0x22 | stores HL into adress listed after PC
 // adr <- L , adr+1 <- H
 void i8080::SHLD(){
-	uint16_t address = (memory[PC+1] << 8) | memory[PC+2];
+	uint16_t address = (memory[PC+2] << 8) | memory[PC+1];
 	writeMem(address, L);
 	writeMem(address + 1, H);
 	PC += 3;
@@ -620,12 +639,12 @@ void i8080::INXH(){
 	INX('H');
 }
 
-// 0x24 | adds one to H and alters Z, S, P, AC flags
+// 0x24 | adds one to H and alters S, Z, AC, P flags
 void i8080::INRH(){
 	INR(H);
 }
 
-// 0x25 | subtracts one from H and alters Z, S, P, AC flags
+// 0x25 | subtracts one from H and alters S, Z, AC, P flags
 void i8080::DCRH(){
 	DCR(H);
 }
@@ -635,46 +654,55 @@ void i8080::MVIH(){
 	MVI(H);
 }
 
-// 0x27 | DAA // XXX need to do
+// 0x27 | convert accumulator into 2x 4bit BCD
+// XXX overflow issue?
 void i8080::DAA(){
-	printf("DAA 0x27 not implemented!\n");
+	if( ((A & 0x0F) > 0x09) || flags.AC){
+		flags.AC = true;
+		A += 0x06;
+	} else {
+		flags.AC = false;
+	}
+
+	if( ((A & 0xF0) > 0x90) || flags.CY){
+		flags.CY = true;
+		A += 0x60;
+	} else {
+		flags.CY = false;
+	}
+	updateFlags(A);
 	PC += 1;
-	opcodeCycleCount = 1;
+	opcodeCycleCount = 4;
 }
 
 // 0x28 | not 8080 code use as NOP
 
 // 0x29 | add HL onto HL
 void i8080::DADH(){
-	uint32_t result = readRegisterPair('H') + readRegisterPair('H');
-	writeRegisterPair('H', result);
-	flags.CY = (result & 0xFFFF0000) > 0;
-	PC += 1;
- 	opcodeCycleCount = 10;
+	DAD('H');
 }
 
-// 0x2A | load 2bytes after PC into HL
+// 0x2A | read memory from 2bytes after PC into HL
 // L <- adr, H <- adr+1
 void i8080::LHLD(){
-	writeRegisterPair('H', ((memory[PC+2] << 8) | memory[PC+1]) );
+	uint16_t address = ( (memory[PC+2] << 8) | memory[PC+1] );
+	L = memory[address];
+	H = memory[address + 1];
 	PC += 3;
 	opcodeCycleCount = 16;
 }
 
 // 0x2B | decrease HL by 1
 void i8080::DCXH(){
-	uint16_t result = readRegisterPair('H') - 1;
-	writeRegisterPair('H', result);
-	PC += 1;
-	opcodeCycleCount = 5;
+	DCX('H');
 }
 
-// 0x2C | adds one to L and alters Z, S, P, AC flags
+// 0x2C | adds one to L and alters S, Z, AC, P flags
 void i8080::INRL(){
 	INR(L);
 }
 
-// 0x2D | subtracts one from L and alters Z, S, P, AC flags
+// 0x2D | subtracts one from L and alters S, Z, AC, P flags
 void i8080::DCRL(){
 	DCR(L);
 }
@@ -688,18 +716,14 @@ void i8080::MVIL(){
 void i8080::CMA(){
 	A = ~A;
 	PC += 1;
-	opcodeCycleCount = 1;
+	opcodeCycleCount = 4;
 }
 
 // 0x30 | unimplemented in 8080, treat as NOP
 
 // 0x31 | load data after PC as new Stack pointer
-// sp.lo = pc+1, sp.hi = pc+2
-// XXX alter generic LXI to be usable with SP?
 void i8080::LXISP(){
-	SP = (memory[PC+2] << 8) | memory[PC+1];
-	PC += 3;
-	opcodeCycleCount = 10;
+	LXI('S');
 }
 
 // 0x32 | stores A into the address from bytes after PC
@@ -708,14 +732,12 @@ void i8080::STA(){
 	uint16_t address = (memory[PC+2] << 8) | memory[PC+1];
 	writeMem(address, A);
 	PC += 3;
-	opcodeCycleCount = 19;
+	opcodeCycleCount = 13;
 }
 
 // 0x33 | add one to SP
 void i8080::INXSP(){
-	SP += 1;
-	PC += 1;
-	opcodeCycleCount += 5;
+	INX('S');
 }
 
 // 0x34 | increase the value pointed to by HL
@@ -728,7 +750,7 @@ void i8080::INRM(){
 	opcodeCycleCount = 10;
 }
 
-// 0x35 | decrease tge value pointed to by HL
+// 0x35 | decrease the value pointed to by HL
 void i8080::DCRM(){
 	uint16_t address = readRegisterPair('H');
 	uint8_t newValue = memory[address] - 1;
@@ -749,18 +771,14 @@ void i8080::MVIM(){
 void i8080::STC(){
 	flags.CY = true;
 	PC += 1;
-	opcodeCycleCount = 1;
+	opcodeCycleCount = 4;
 }
 
 // 0x38 | unimplemented in 8080, use as alt NOP
 
 // 0x39 | add SP onto HL
 void i8080::DADSP(){
-	uint32_t result = readRegisterPair('H') + SP;
-	writeRegisterPair('H', result);
-	flags.CY = (result & 0xFFFF0000) > 0;
-	PC += 1;
- 	opcodeCycleCount = 10;
+	DAD('S');
 }
 
 // 0x3A | set reg A to the value pointed by bytes after PC
@@ -772,17 +790,15 @@ void i8080::LDA(){
 
 // 0x3B | decrease SP by 1
 void i8080::DCXSP(){
-	SP -= 1;
-	PC += 1;
-	opcodeCycleCount = 1;
+	DCX('S');
 }
 
-// 0x3C | adds one to A and alters Z, S, P, AC flags
+// 0x3C | adds one to A and alters S, Z, AC, P flags
 void i8080::INRA(){
 	INR(A);
 }
 
-// 0x3D | subtracts one from A and alters Z, S, P, AC flags
+// 0x3D | subtracts one from A and alters S, Z, AC, P flags
 void i8080::DCRA(){
 	DCR(A);
 }
@@ -796,10 +812,10 @@ void i8080::MVIA(){
 void i8080::CMC(){
 	flags.CY = !flags.CY;
 	PC += 1;
-	opcodeCycleCount = 1;
+	opcodeCycleCount = 5;
 }
 
-// (0x40 - 0x74), (0x77 - 0x7F) | MOV
+// (0x40 - 0x75), (0x77 - 0x7F) | MOV
 void i8080::MOV(){
 	uint8_t dest = (opcode & 0b00111000) >> 3;
 	uint8_t source = (opcode & 0b00000111);
@@ -807,14 +823,10 @@ void i8080::MOV(){
 	// MOV's involving Mem use 7, not 5
 	opcodeCycleCount = 7;
 	if(dest == 0b110) { // if dest is mem
-		//printf("Mov reg => mem");
 		writeMem(readRegisterPair('H'), *opcodeDecodeRegisterBits(source));  
 	} else if(source == 0b110){ // if source is mem
-		printf("Mov mem => reg");
 		writeMem(*opcodeDecodeRegisterBits(dest), readRegisterPair('H'));
 	} else { // dest & source are normal registers
-		//printf("Mov %X reg %d => %X reg %d", *opcodeDecodeRegisterBits(dest), *opcodeDecodeRegisterBits(source), opcodeDecodeRegisterBits(dest), opcodeDecodeRegisterBits(source));
-		//writeMem(*opcodeDecodeRegisterBits(dest), *opcodeDecodeRegisterBits(source));
 		*opcodeDecodeRegisterBits(dest) = *opcodeDecodeRegisterBits(source);
 		opcodeCycleCount = 5;
 	}
@@ -826,7 +838,7 @@ void i8080::MOV(){
 void i8080::HLT(){
 	printf("HLT not implemented yet!\n");
 	PC += 1;
-	opcodeCycleCount = 1;
+	opcodeCycleCount = 7;
 }
 
 // (0x80 - 0x87) | Add a register/mem value onto A, and update all flags
@@ -842,7 +854,7 @@ void i8080::ADD(){
 	}
 	uint16_t sum = A + increment;
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF;
 	updateFlags(A);
 	PC += 1;
 }
@@ -860,7 +872,7 @@ void i8080::ADC(){
 	}
 	uint16_t sum = A + increment + (uint8_t)flags.CY;
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF;
 	updateFlags(A);
 	PC += 1;
 }
@@ -876,11 +888,27 @@ void i8080::SUB(){
 		decrement = *opcodeDecodeRegisterBits(sourceAddress);
 		opcodeCycleCount = 4;
 	}
-	uint16_t sum = A - decrement;
-	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	// 2s complement subtraction, done in 4bit amounts, for AC
+	decrement = ~decrement;
+	uint8_t lowerDec = decrement & 0x0F;
+	uint8_t lowerA = A & 0x0F;
+	uint8_t lowerSum = lowerDec + lowerA + 1;
+	flags.AC = lowerSum > 0xF;
+
+	uint8_t upperDec = (decrement & 0xF0) >> 4;
+	uint8_t upperA = (A & 0xF0) >> 4;
+	uint8_t upperSum = upperDec + upperA + ((lowerSum & 0x10)>>4);	
+	flags.CY = (0x10 != (upperSum & 0x10));
+	A = (upperSum << 4) + lowerSum;
 	updateFlags(A);
 	PC += 1;
+/*
+	uint16_t sum = A - decrement;
+	A = (sum & 0xFF);
+	flags.CY = sum > 0xFF;
+	updateFlags(A);
+	PC += 1;
+*/
 }
 
 // (0x98 - 0x9F) | Add a register/mem value - carry bit onto A, update registers
@@ -894,11 +922,28 @@ void i8080::SBB(){
 		decrement = *opcodeDecodeRegisterBits(sourceAddress);
 		opcodeCycleCount = 4;
 	}
-	uint16_t sum = A - decrement - (uint8_t)flags.CY;
-	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+
+	// 2s complement subtraction, done in 4bit amounts, for AC
+	decrement = ~decrement;
+	uint8_t lowerDec = decrement & 0x0F;
+	uint8_t lowerA = A & 0x0F;
+	uint8_t lowerSum = lowerDec + lowerA + 1 + (uint8_t)flags.CY;
+	flags.AC = lowerSum > 0xF;
+
+	uint8_t upperDec = (decrement & 0xF0) >> 4;
+	uint8_t upperA = (A & 0xF0) >> 4;
+	uint8_t upperSum = upperDec + upperA + ((lowerSum & 0x10)>>4);	
+	flags.CY = (0x10 != (upperSum & 0x10));
+	A = (upperSum << 4) + lowerSum;
 	updateFlags(A);
 	PC += 1;
+/*
+	uint16_t sum = A - decrement - (uint8_t)flags.CY;
+	A = (sum & 0xFF);
+	flags.CY = sum > 0xFF;
+	updateFlags(A);
+	PC += 1;
+*/
 }
 
 // (0xA0 - 0xA7) | Bitwise AND a register/mem value with A, update registers
@@ -914,7 +959,7 @@ void i8080::ANA(){
 	}
 	uint16_t result = A & modifier;
 	A = (result & 0xFF);
-	flags.CY = (result & 0xFF00) > 0;
+	flags.CY = false;
 	updateFlags(A);
 	PC += 1;
 }
@@ -932,7 +977,7 @@ void i8080::XRA(){
 	}
 	uint16_t result = A ^ modifier;
 	A = (result & 0xFF);
-	flags.CY = (result & 0xFF00) > 0;
+	flags.CY = false;
 	updateFlags(A);
 	PC += 1;
 }
@@ -950,7 +995,7 @@ void i8080::ORA(){
 	}
 	uint16_t result = A | modifier;
 	A = (result & 0xFF);
-	flags.CY = (result & 0xFF00) > 0;
+	flags.CY = false;
 	updateFlags(A);
 	PC += 1;
 }
@@ -967,44 +1012,34 @@ void i8080::CMP(){
 		opcodeCycleCount = 4;
 	}
 	uint16_t result = A - modifier;
-	flags.CY = (result & 0xFF00) > 0;
+	flags.CY = (result & 0xFF00) ==  0;
 	updateFlags(result);
 	PC += 1;
 }
 
 // 0xC0 | return on nonzero
-// XXX do i needa mess with PC auto changing?
 void i8080::RNZ(){
 	RETURN((flags.Z == false));
-	opcodeCycleCount = 1;
 }
 
 // 0xC1 | pull BC pair from stack
 void i8080::POPB(){
 	writeRegisterPair('B', POP());
-	PC += 1;
-	opcodeCycleCount = 1;
 }
 
 // 0xC2 | jump to address from after PC if non zero
 void i8080::JNZ(){
-	printf("flags.Z = %s\n", (flags.Z ? "true" : "false"));
-	if(flags.Z == false){
-		JUMP();
-	} else {
-		PC += 3;
-		opcodeCycleCount = 1;
-	}
+	JUMP(flags.Z == false);
 }
 
 // 0xC3 | normal jump
 void i8080::JMP(){
-	JUMP();
+	JUMP(true);
 }
 
 // 0xC4 | run call if non zero
 void i8080::CNZ(){
-	genericCALL((flags.Z == false));
+	genericCALL(flags.Z == false);
 }
 
 // 0xC5 | store BC pair on stack
@@ -1016,15 +1051,15 @@ void i8080::PUSHB(){
 void i8080::ADI(){
 	uint16_t sum = A + memory[PC+1];
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF00;
 	updateFlags(A);
-	PC += 1;	
+	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xC7 | calls to $0 
+// 0xC7 | calls to 0H 
 void i8080::RST0(){
-	RESET(0);
+	RESET(0x0);
 }
 
 // 0xC8 | return if Z
@@ -1039,11 +1074,7 @@ void i8080::RET(){
 
 // 0xCA | 
 void i8080::JZ(){
-	if(flags.Z){
-		JUMP();
-	}
-	PC += 1;
-	opcodeCycleCount = 1;
+	JUMP(flags.Z);
 }
 
 // 0xCB | not 8080 code, treat as NOP
@@ -1054,31 +1085,23 @@ void i8080::CZ(){
 }
 
 // 0xCD | store PC on stack, and jump to a new location
-// sp-1   = pc.hi | sp-2  = pc.lo
-// pc.low = pc +1 | pc.hi = pc+2
-// XXX pc auto
 void i8080::CALL(){
-	uint16_t ret = PC + 3;
-	writeMem( (SP-1), (ret>> 8));
-	writeMem( (SP-2), (ret));
-	SP -= 2;
-	PC = (memory[PC+2] << 8) | memory[PC+1];
-	opcodeCycleCount = 17;
+	genericCALL(true);
 }
 
 // 0xCE | add carry bit and Byte onto A
 void i8080::ACI(){
 	uint16_t sum = A + memory[PC+1] + (uint8_t)flags.CY;
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF00;
 	updateFlags(A);
-	PC += 1;	
+	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xCF | resets to $8
+// 0xCF | resets to 8H
 void i8080::RST1(){
-	RESET(8);
+	RESET(0x8);
 }
 
 // 0xD0 | return if Cy = 0
@@ -1089,18 +1112,11 @@ void i8080::RNC(){
 // 0xD1 | fetch data from the stack, and store in DE pair
 void i8080::POPD(){
 	writeRegisterPair('D', POP());
-	PC += 1;
-	opcodeCycleCount = 1;
 }
 
 // 0xD2 | jump when carry = 0
 void i8080::JNC(){
-	if(flags.CY == false){
-		JUMP();
-	} else {
-		PC += 1;
-		opcodeCycleCount = 10;
-	}
+	JUMP(flags.CY == false);
 }
 
 // 0xD3 | XXX special
@@ -1110,7 +1126,7 @@ void i8080::OUT(){
 	opcodeCycleCount = 1;
 }
 
-// 0xD4 | call on carry = 0false
+// 0xD4 | call on carry = false
 void i8080::CNC(){
 	genericCALL((flags.CY == false));
 }
@@ -1124,13 +1140,13 @@ void i8080::PUSHD(){
 void i8080::SUI(){
 	uint16_t result = A - memory[PC+1];
 	A = (result & 0xFF);
-	flags.CY = (result & 0xFF00) > 0;
+	flags.CY = result > 0xFF00;
 	updateFlags(A);
 	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xD7 | reset to $10
+// 0xD7 | reset to 10H
 void i8080::RST2(){
 	RESET(0x10);
 }
@@ -1144,12 +1160,7 @@ void i8080::RC(){
 
 // 0xDA | jump if cy = 1
 void i8080::JC(){
-	if(flags.CY){
-		JUMP();
-	} else {
-		PC += 1;
-		opcodeCycleCount = 1;
-	}	
+	JUMP(flags.CY);
 }
 
 // 0xDB | XXX SPECIAL
@@ -1170,13 +1181,13 @@ void i8080::CC(){
 void i8080::SBI(){
 	uint16_t sum = A - memory[PC+1] - (uint8_t)flags.CY;
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF00;
 	updateFlags(A);
 	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xDF | reset to $18
+// 0xDF | reset to 18H
 void i8080::RST3(){
 	RESET(0x18);
 }
@@ -1189,33 +1200,26 @@ void i8080::RPO(){
 // 0xE1 | store values from stack in HL pair
 void i8080::POPH(){
 	writeRegisterPair('H', POP());
-	PC += 1;
-	opcodeCycleCount = 1;
 }
 
 // 0xE2 | jump if p = 0
 void i8080::JPO(){
-	if(flags.P){
-		JUMP();
-	} else {
-		PC += 1;
-		opcodeCycleCount = 1;
-	}
+	JUMP(flags.P == 0);
 }
 
 // 0xE3 | exchange HL and SP
 // L <-> SP | H <-> SP+1
 void i8080::XTHL(){
-	uint16_t oldSP = POP();
+	uint16_t stackContents = (memory[SP+1] << 8) | memory[SP];
 	SP = (H << 8) | L;
-	writeRegisterPair('H', oldSP);
+	writeRegisterPair('H', stackContents);
 	PC += 1;
 	opcodeCycleCount = 18;
 } 
 
 // 0xE4 | call if p = 0
 void i8080::CPO(){
-	genericCALL(flags.P);
+	genericCALL(flags.P == 0);
 }
 
 // 0xE5 | store HL on the stack
@@ -1227,13 +1231,13 @@ void i8080::PUSHH(){
 void i8080::ANI(){
 	uint16_t sum = A & memory[PC+1];
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF00;
 	updateFlags(A);
 	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xE7 | reset to $20
+// 0xE7 | reset to 20H
 void i8080::RST4(){
 	RESET(0x20);
 }
@@ -1250,12 +1254,7 @@ void i8080::PCHL(){
 
 // 0xEA | jump if p = 1
 void i8080::JPE(){
-	if(flags.P){
-		JUMP();
-	} else {
-		PC += 1;
-		opcodeCycleCount = 1;
-	}
+	JUMP(flags.P);
 }
 
 // 0xEB | exchange HL and DE
@@ -1264,7 +1263,7 @@ void i8080::XCHG(){
 	writeRegisterPair('D', (H << 8) | L);
 	writeRegisterPair('H', oldDE);
 	PC += 1;
-	opcodeCycleCount = 4;
+	opcodeCycleCount = 5;
 }
 
 // 0xEC | call if p = 1
@@ -1278,13 +1277,13 @@ void i8080::CPE(){
 void i8080::XRI(){
 	uint16_t sum = A ^ memory[PC+1];
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF00;
 	updateFlags(A);
 	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xEF | reset to $28
+// 0xEF | reset to 28H
 void i8080::RST5(){
 	RESET(0x28);
 }
@@ -1297,27 +1296,22 @@ void i8080::RP(){
 // 0xF1 | pops flags and A off of stack
 void i8080::POPPSW(){
 	uint16_t data = POP();
-	writePSW(data & 0x00FF);
-	A = (data >> 8);
+	writePSW(data >> 8);
+	A = (data & 0x00FF);
 	PC += 1;
 	opcodeCycleCount = 10;
 }
 
 // 0xF2 | jump if positive
 void i8080::JP(){
-	if(flags.S == false){
-		JUMP();
-	} else {
-		PC += 1;
-		opcodeCycleCount = 1;
-	}
+	JUMP(flags.S == false);
 }
 
 // 0xF3 | XXX special
 void i8080::DI(){
-	printf("DI unimplemented!\n");
+	INTE = false;
 	PC += 1;
-	opcodeCycleCount = 1;
+	opcodeCycleCount = 4;
 }
 
 // 0xF4 | call if positive
@@ -1335,13 +1329,13 @@ void i8080::PUSHPSW(){
 void i8080::ORI(){
 	uint16_t sum = A | memory[PC+1];
 	A = (sum & 0xFF);
-	flags.CY = (sum & 0xFF00) > 0;
+	flags.CY = sum > 0xFF00;
 	updateFlags(A);
 	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xF7 | rest to $30
+// 0xF7 | rest to 30H
 void i8080::RST6(){
 	RESET(0x30);
 }
@@ -1360,19 +1354,14 @@ void i8080::SPHL(){
 
 // 0xFA | jump if minus
 void i8080::JM(){
-	if(flags.S == true){
-		JUMP();
-	} else {
-		PC += 1;
-		opcodeCycleCount = 10;
-	}
+	JUMP(flags.S == true);
 }
 
 // 0xFB | XXX special
 void i8080::EI(){
-	printf("EI not implemented yet!\n");
+	INTE = true;
 	PC += 1;
-	opcodeCycleCount = 1;
+	opcodeCycleCount = 4;
 }
 
 // 0xFC | call if minus
@@ -1386,15 +1375,15 @@ void i8080::CM(){
 void i8080::CPI(){
 	uint8_t sum = A - memory[PC+1];
 	//uint16_t sum = A - memory[PC+1];
-	printf("A: %X - byte: %X  sum = %X\n",A, memory[PC+1],  sum);
+	//printf("A: %X - byte: %X  sum = %X\n",A, memory[PC+1],  sum);
 	//A = (sum & 0xFF);
-	flags.CY = sum < memory[PC+1];
+	flags.CY = A < memory[PC+1];
 	updateFlags(sum);
 	PC += 2;	
 	opcodeCycleCount = 7;
 }
 
-// 0xFF | reset to $38
+// 0xFF | reset to 38H
 void i8080::RST7(){
 	RESET(0x38);
 }

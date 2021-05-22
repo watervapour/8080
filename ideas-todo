@@ -1,0 +1,29 @@
+mem rendering:
+	- make each line its own rect, might make optomising easy
+	- 0xF or 0x20 entries wide
+
+cycle timing may need checking
+	- draw timers nested instead of being seperate?
+	- cycletime inluding drawing good?
+
+Drawing:
+	dont clear screen, as RAM changes rarely?
+	draw pixels to a surface for game rendering?
+	text array recreated each frame?
+	text[8]=q?
+
+.h
+	memory is array, not portable (but who cares)
+.cpp
+deconstructor doesnt free ram (reduntant once ram moved, if ever)
+
+
+ADD not affectign AC?
+0x76 HLT not implemented
+sub and SBB carry weirdness | check if  simple uint16 sub cant be used
+sign-extension and all that
+
+0xD3 unimplement
+0xDB not yet implemented
+0xF3 not yet implemented
+0xFB not yet implement

@@ -7,6 +7,7 @@ class i8080 {
 private:
 	// Routine registers
 	uint16_t SP, PC;
+	bool hold = false;
 
 	// Registers
 	uint8_t A, B, C, D, E, H, L;
@@ -20,6 +21,15 @@ private:
 	PSW flags;
 	uint8_t readPSW();
 	void writePSW(uint8_t);
+
+	//interrupt enable bit
+	bool INTE = true;
+	// interrupt
+	bool INT = false;
+	void signalInt();	
+
+	// IO
+	uint8_t dataBus = 0;
 
 	// XXX move out of 8080 implementation? so it is portable/reusable for 8085 etc?
 	// XXX had made 16bit
@@ -36,12 +46,11 @@ private:
 	uint8_t* opcodeDecodeRegisterBits(uint8_t);
 
 	void updateFlags(const uint8_t&);
-	bool parityCheck(const uint8_t&);
 
 	void writeMem(uint16_t, uint8_t);
 	// ===== GENERIC CODES =====
-	void LXI(char); void INX(char); void INR(uint8_t&); void DCR(uint8_t&); void MVI(uint8_t&);
-	uint16_t POP(); void JUMP(); void genericCALL(bool); void PUSH(uint16_t); void RESET(uint16_t);
+	void LXI(char); void INX(char); void INR(uint8_t&); void DCR(uint8_t&); void MVI(uint8_t&);void DAD(char);void DCX(char);
+	uint16_t POP(); void JUMP(bool); void genericCALL(bool); void PUSH(uint16_t); void RESET(uint16_t);
 	void RETURN(bool);
 
 	// opcode functions

@@ -36,6 +36,7 @@ SDL_Rect pixel = {0, 0, gameScale, gameScale};
 int sWidth;
 int sHeight;
 int steps = 0;
+int grossSteps = 0;
 
 std::chrono::high_resolution_clock::time_point cycleStart;
 std::chrono::high_resolution_clock::time_point cycleEnd;
@@ -86,7 +87,7 @@ int main(int argc, char** argv){
 
 				case(SDLK_SPACE):
 					My8080.emulateCycle();
-					//printf("step!\n");
+					printf("step! %i\n", ++grossSteps);
 					break;
 				case(SDLK_p):
 					My8080.printState();
@@ -94,6 +95,7 @@ int main(int argc, char** argv){
 				case(SDLK_g):
 					for(int i=0;i<10;++i){
 						My8080.emulateCycle();
+						printf("step! %i\n", ++grossSteps);
 						//My8080.printState();
 					}
 					break;
@@ -117,14 +119,15 @@ int main(int argc, char** argv){
 			} else if (e.type == SDL_KEYUP){
 
 			}
-	}
+		} // end input processing
 	
 	if(autostep && (deltaLastStep >= 0.000001)){
 		My8080.emulateCycle();
 		++steps;
 		//My8080.printState();
+		printf("step! %i\n", ++grossSteps);
 		deltaLastStep -= 0.000001;
-	};
+	}
 
 	if(deltaLastDraw >= 0.06){
 		drawGraphics(My8080);
