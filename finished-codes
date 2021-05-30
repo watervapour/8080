@@ -153,3 +153,33 @@ Opcodes:
 0xfd
 0xfe
 0xff
+
+==============================
+trusted codes
+=============================
+00
+05
+06
+0e
+11
+13
+19
+1a
+
+21
+23
+26
+29
+31
+36-
+6f
+77
+7c
+c2
+c3
+cd
+d5
+e1
+e5
+eb
+fe-should affect parity bit

@@ -7,7 +7,6 @@ class i8080 {
 private:
 	// Routine registers
 	uint16_t SP, PC;
-	bool hold = false;
 
 	// Registers
 	uint8_t A, B, C, D, E, H, L;
@@ -22,18 +21,21 @@ private:
 	uint8_t readPSW();
 	void writePSW(uint8_t);
 
+	bool hold = false;
 	//interrupt enable bit
 	bool INTE = true;
 	// interrupt
 	bool INT = false;
 	void signalInt();	
-
 	// IO
 	uint8_t dataBus = 0;
+	uint16_t bitShifter = 0;
+	uint8_t bitShifterAmount = 0;
 
 	// XXX move out of 8080 implementation? so it is portable/reusable for 8085 etc?
 	// XXX had made 16bit
 	uint8_t memory[0x8000] = {false};
+
 
 	uint8_t opcode;
 	uint8_t opcodeCycleCount;

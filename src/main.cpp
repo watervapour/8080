@@ -13,8 +13,8 @@ double netCycleUs;
 
 // Window settings
 const uint8_t gameScale = 2;
-const int gameWidth = 256 * gameScale;
-const int gameHeight = 224 * gameScale;
+const int gameWidth = 224 * gameScale;
+const int gameHeight = 256 * gameScale;
 const int ramWidth = 800;
 const int ramHeight = 640;
 const int width = gameWidth + ramWidth;
@@ -99,13 +99,19 @@ int main(int argc, char** argv){
 						//My8080.printState();
 					}
 					break;
+				case(SDLK_f):
+					for(int i=0;i<100;++i){
+						My8080.emulateCycle();
+						printf("step! %i\n", ++grossSteps);
+						//My8080.printState();
+					}
+					break;
 				case(SDLK_o):
 					autostep = !autostep;
 					break;
 				case(SDLK_q):
 					quit = true;
 					break;
-
 				//ram scrolling
 				case(SDLK_l):
 					ramPage++;
@@ -115,9 +121,108 @@ int main(int argc, char** argv){
 					ramPage--;
 					if(ramPage < 0){ ramPage = (pageCount - 1); }
 					break;
+				// system input
+
+				// Port 1
+				case(SDLK_c): //coin
+					My8080.port1 = My8080.port1 | 0x01;
+					break;
+				case(SDLK_2): //p2start
+					My8080.port1 = My8080.port1 | 0x02;
+					break;
+				case(SDLK_1): //p1start
+					My8080.port1 = My8080.port1 | 0x04;
+					break;
+				// 0x08 unused
+				case(SDLK_z): //p1 shoot
+					My8080.port1 = My8080.port1 | 0x10;
+					break;
+				case(SDLK_LEFT): //p1 left
+					My8080.port1 = My8080.port1 | 0x20;
+					break;
+				case(SDLK_RIGHT): //p1 right
+					My8080.port1 = My8080.port1 | 0x40;
+					break;
+				//0x80 unused
+
+				// Port 2
+				case(SDLK_KP_0): //life dipswitch upper bit
+					My8080.port2 = My8080.port2 ^ 0x01;
+					break;
+				case(SDLK_KP_1): //life dipswitch lower bit
+					My8080.port2 = My8080.port2 ^ 0x02;
+					break;
+				case(SDLK_KP_2): //tilt
+					My8080.port2 = My8080.port2 | 0x04;
+					break;
+				case(SDLK_KP_3): //life bonus
+					My8080.port2 = My8080.port2 ^ 0x08;
+					break;
+				case(SDLK_KP_4): //p2 shoot
+					My8080.port2 = My8080.port2 | 0x10;
+					break;
+				case(SDLK_a): //p2 left
+					My8080.port2 = My8080.port2 | 0x20;
+					break;
+				case(SDLK_d): //p2 right
+					My8080.port2 = My8080.port2 | 0x40;
+					break;
+				case(SDLK_7): //coin info
+					My8080.port2 = My8080.port2 ^ 0x80;
+					break;
 				}
 			} else if (e.type == SDL_KEYUP){
+				switch(e.key.keysym.sym){
+				// My8080 input
 
+					// Port 1
+					case(SDLK_c): //coin
+						My8080.port1 = My8080.port1 ^ 0x01;
+						break;
+					case(SDLK_2): //p2start
+						My8080.port1 = My8080.port1 ^ 0x02;
+						break;
+					case(SDLK_1): //p1start
+						My8080.port1 = My8080.port1 ^ 0x04;
+						break;
+					// 0x08 unused
+					case(SDLK_z): //p1 shoot
+						My8080.port1 = My8080.port1 ^ 0x10;
+						break;
+					case(SDLK_LEFT): //p1 left
+						My8080.port1 = My8080.port1 ^ 0x20;
+						break;
+					case(SDLK_RIGHT): //p1 right
+						My8080.port1 = My8080.port1 ^ 0x40;
+						break;
+					//0x80 unused
+
+					// Port 2
+					case(SDLK_KP_0): //life dipswitch upper bit
+						My8080.port2 = My8080.port2 ^ 0x01;
+						break;
+					case(SDLK_KP_1): //life dipswitch lower bit
+						My8080.port2 = My8080.port2 ^ 0x02;
+						break;
+					case(SDLK_KP_2): //tilt
+						My8080.port2 = My8080.port2 ^ 0x04;
+						break;
+					case(SDLK_KP_3): //life bonus
+						My8080.port2 = My8080.port2 ^ 0x08;
+						break;
+					case(SDLK_KP_4): //p2 shoot
+						My8080.port2 = My8080.port2 ^ 0x10;
+						break;
+					case(SDLK_a): //p2 left
+						My8080.port2 = My8080.port2 ^ 0x20;
+						break;
+					case(SDLK_d): //p2 right
+						My8080.port2 = My8080.port2 ^ 0x40;
+						break;
+					case(SDLK_7): //coin info
+						My8080.port2 = My8080.port2 ^ 0x80;
+						break;
+				}
 			}
 		} // end input processing
 	
@@ -199,23 +304,25 @@ void drawGraphics(i8080 system){
 	SDL_SetRenderDrawColor(gRenderer, 0x20, 0x20, 0x20, 0xFF);
 	SDL_RenderClear(gRenderer);
 
-	// draw game
-	//printf("Game draw \n");
-	for(int y = 0; y < 224; ++y){
-		for(int x = 0; x < 32; ++x){
-			// change colour here
-
-			uint8_t pixelSet = system.fetchGFXPixel(y*32+x);
+	SDL_SetRenderDrawColor(gRenderer, 0xBB, 0xBB, 0xBB, 0xFF);
+	
+	// new draw
+	for(int y=0;y<256;y+=8){
+		for(int x=0;x<224;++x){
+			//printf("Accessing %d, %d = %d\n", x, y, (32*x+0x241F-y/8));
+			uint8_t pixelCol = system.fetchGFXPixel( (32*x+0x241F-y/8));
 			for(uint8_t shift = 0; shift < 8; ++shift){
-				if(pixelSet & (0x80 >> shift)){
-					pixel.x = (x * 8 + shift) * gameScale;
-					pixel.y = y * gameScale;
+				if(pixelCol & (0x80 >> shift)){
+					pixel.x = x * gameScale;
+					pixel.y = y+shift * gameScale;
 					SDL_RenderFillRect(gRenderer, &pixel);
 				}
 			}
 		}
 	}
-	
+	SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x02, 0x70, 0xFF);
+	SDL_RenderDrawLine(gRenderer, 224*gameScale, 0*gameScale, 224*gameScale, 256*gameScale); 	
+	SDL_RenderDrawLine(gRenderer, 0*gameScale, 256*gameScale, 224*gameScale, 256*gameScale); 	
 	char text[6 + 2 + (3 * colCount)];
 	text[(sizeof(text)/sizeof(text[0]))] = '\0';
 

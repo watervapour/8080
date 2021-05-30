@@ -83,7 +83,6 @@ void i8080::signalInt(){
 @return: a byte of scanline data
 */
 uint8_t i8080::fetchGFXPixel(int index){
-	index += 0x2400;
 	if((index < 0x2400) | (index > 0x3FFF)){
 		printf("Accesing GFX outside video RAM!\n");
 		return 0;
@@ -822,15 +821,20 @@ void i8080::MOV(){
 
 	// MOV's involving Mem use 7, not 5
 	opcodeCycleCount = 7;
+	/*
 	if(dest == 0b110) { // if dest is mem
 		writeMem(readRegisterPair('H'), *opcodeDecodeRegisterBits(source));  
 	} else if(source == 0b110){ // if source is mem
-		writeMem(*opcodeDecodeRegisterBits(dest), readRegisterPair('H'));
+		*opcodeDecodeRegisterBits(dest) =  readRegisterPair('H'));
 	} else { // dest & source are normal registers
 		*opcodeDecodeRegisterBits(dest) = *opcodeDecodeRegisterBits(source);
 		opcodeCycleCount = 5;
 	}
-
+	*/
+	*opcodeDecodeRegisterBits(dest) = *opcodeDecodeRegisterBits(source);
+	if(dest == 0b110 || source == 0b110){
+		opcodeCycleCount = 5;
+	}
 	PC += 1;
 }
 
@@ -1122,8 +1126,27 @@ void i8080::JNC(){
 // 0xD3 | XXX special
 void i8080::OUT(){
 	printf("OUT unimplemented!\n");
-	PC += 1;
-	opcodeCycleCount = 1;
+	uint8_t port = memory[PC+1];
+	switch(port){
+	case(2):
+		bitShifterAmount = A;
+		break;
+	case(3):
+		printf("sound! %d\n", A);
+		break;
+	case(4):
+		bitShifter >> 8;
+		bitShifter &= (A << 8);
+		break;
+	case(5):
+		printf("sound %d\n", A);
+		break;
+	case(6):
+		printf("debug, unused, panic if seen\n");
+		break;
+	}
+	PC += 2;
+	opcodeCycleCount = 10;
 }
 
 // 0xD4 | call on carry = false
@@ -1166,8 +1189,20 @@ void i8080::JC(){
 // 0xDB | XXX SPECIAL
 void i8080::IN(){
 	printf("IN unimplemented!\n");
-	PC += 1;
-	opcodeCycleCount = 1;
+	uint8_t port = memory[PC+1];
+	switch(port){
+	case(1):
+		A = port1;
+		break;
+	case(2):
+		A = port2;
+		break;
+	case(3):
+		A = bitShifter & (0xFF >> bitShifterAmount) >> (8-bitShifterAmount);
+		break;
+	}
+	PC += 2;
+	opcodeCycleCount = 10;
 }
 
 // 0xDC | call if cy =1
