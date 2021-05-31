@@ -304,7 +304,7 @@ void drawGraphics(i8080 system){
 	SDL_SetRenderDrawColor(gRenderer, 0x20, 0x20, 0x20, 0xFF);
 	SDL_RenderClear(gRenderer);
 
-	SDL_SetRenderDrawColor(gRenderer, 0xBB, 0xBB, 0xBB, 0xFF);
+	SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x02, 0x70, 0xFF);
 	
 	// new draw
 	for(int y=0;y<256;y+=8){
@@ -320,9 +320,7 @@ void drawGraphics(i8080 system){
 			}
 		}
 	}
-	SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x02, 0x70, 0xFF);
-	SDL_RenderDrawLine(gRenderer, 224*gameScale, 0*gameScale, 224*gameScale, 256*gameScale); 	
-	SDL_RenderDrawLine(gRenderer, 0*gameScale, 256*gameScale, 224*gameScale, 256*gameScale); 	
+	
 	char text[6 + 2 + (3 * colCount)];
 	text[(sizeof(text)/sizeof(text[0]))] = '\0';
 

@@ -14,7 +14,7 @@ LIBRARY_PATHS = -LS:\Mutual\Code\C++\Libraries\SDL2-2.0.14-mingw\x86_64-w64-ming
 
 #COMPILER_FLAGS specifies the additional compilation options we're using
 # -w supresses all warnings
-COMPILER_FLAGS = -w -Wl,-subsystem,windows -static-libgcc
+COMPILER_FLAGS = -w -Wl,-subsystem,windows -static-libgcc -static-libstdc++
 DEBUG_FLAGS = -g
 
 #LINKER_FLAGS specifies the libraties we;re linking against
