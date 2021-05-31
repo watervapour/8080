@@ -314,7 +314,7 @@ void drawGraphics(i8080 system){
 			for(uint8_t shift = 0; shift < 8; ++shift){
 				if(pixelCol & (0x80 >> shift)){
 					pixel.x = x * gameScale;
-					pixel.y = y+shift * gameScale;
+					pixel.y = (y+shift) * gameScale;
 					SDL_RenderFillRect(gRenderer, &pixel);
 				}
 			}
