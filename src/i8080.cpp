@@ -56,17 +56,16 @@ bool i8080::loadROM(const char* path){
 }
 
 void i8080::emulateCycle(){
-	// will need to check for interrupts, disabled for early bugfixing
-	if(INT){
+	if(INT & INTE){
+		INT = false;
 		writeMem( (SP-1), (PC & 0xFF00) >> 8);
 		writeMem( (SP-2), (PC & 0x00FF));
 		SP -= 2;
 		(this->*opcodeArray[dataBus])();
 	}
-	// XXX 1==1 to override the cycle count aspect
-	if(opcodeCycleCount <= 0 | 1==1 & !hold){
+	if(true | opcodeCycleCount <= 0 & !hold){
 		opcode = memory[PC];
-		printf("PC: %X | OP: %X\n",PC, opcode);
+		//printf("PC: %X | OP: %X\n",PC, opcode);
 		(this->*opcodeArray[opcode])();
 	}
 	opcodeCycleCount -= 1;
@@ -1328,11 +1327,11 @@ void i8080::RP(){
 	RETURN(flags.S == false);
 }
 
-// 0xF1 | pops flags and A off of stack
+// 0xF1 | pops A and flags  off of stack
 void i8080::POPPSW(){
 	uint16_t data = POP();
-	writePSW(data >> 8);
-	A = (data & 0x00FF);
+	A = (data >> 8);
+	writePSW(data & 0x00FF);
 	PC += 1;
 	opcodeCycleCount = 10;
 }

@@ -23,12 +23,10 @@ private:
 
 	bool hold = false;
 	//interrupt enable bit
-	bool INTE = true;
+	bool INTE = false;
 	// interrupt
 	bool INT = false;
-	void signalInt();	
 	// IO
-	uint8_t dataBus = 0;
 	uint16_t bitShifter = 0;
 	uint8_t bitShifterAmount = 0;
 
@@ -167,6 +165,10 @@ public:
 		7: dipswitch coin info 1:off, 0:on
 	*/
 	uint8_t port2;
+	void signalInt();	
+	// IO
+	uint8_t dataBus = 0;
+
 
 	// Emulation
 	void emulateCycle();

@@ -7,9 +7,9 @@
 
 // Emulation settings
 bool autostep = false;
-double deltaLastStep;
-double cycleUs;
-double netCycleUs;
+unsigned int deltaLastStep;
+unsigned int cyclens;
+unsigned int netCyclens;
 
 // Window settings
 const uint8_t gameScale = 2;
@@ -35,16 +35,16 @@ int ramYOffset = 100;
 SDL_Rect pixel = {0, 0, gameScale, gameScale};
 int sWidth;
 int sHeight;
-int steps = 0;
-int grossSteps = 0;
+unsigned int steps = 0;
+unsigned int grossSteps = 0;
 
 std::chrono::high_resolution_clock::time_point cycleStart;
 std::chrono::high_resolution_clock::time_point cycleEnd;
-std::chrono::duration<double> cycleTime;
+std::chrono::nanoseconds cycleTime;
 std::chrono::high_resolution_clock::time_point drawStart;
 std::chrono::high_resolution_clock::time_point drawEnd;
-std::chrono::duration<double> drawTime;
-double deltaLastDraw = 0;
+std::chrono::nanoseconds drawTime;
+unsigned int deltaLastDraw = 0;
 
 SDL_Surface* gWindowSurface = NULL;
 SDL_Renderer* gRenderer = NULL;
@@ -226,37 +226,40 @@ int main(int argc, char** argv){
 			}
 		} // end input processing
 	
-	if(autostep && (deltaLastStep >= 0.000001)){
-		My8080.emulateCycle();
-		++steps;
-		//My8080.printState();
-		printf("step! %i\n", ++grossSteps);
-		deltaLastStep -= 0.000001;
-	}
-
-	if(deltaLastDraw >= 0.06){
-		drawGraphics(My8080);
-	}
-
-	// Timer stuff
-	cycleEnd = std::chrono::high_resolution_clock::now();
-	cycleTime = std::chrono::duration_cast<std::chrono::duration<double>>(cycleEnd - cycleStart);
-	if(deltaLastDraw >= 0.06){
-		deltaLastDraw = 0;
-	} else {
-		deltaLastDraw += cycleTime.count();
-	}
-	deltaLastStep += cycleTime.count(); 
-	netCycleUs += 1000000 * cycleTime.count();
-	//printf("Cycle time: %f us \n", 1000000 * cycleTime.count() );
-	//printf("Delta time: %f us \n", 1000000 * deltaLastStep );
-	//printf("NSus time: %f us \n", netCycleUs );
-	if(netCycleUs >= 1000000){
-		//printf("Steps completed this second: %d\n", steps);
-		netCycleUs = 0;
-		steps = 0;
-	}
-
+		if(autostep && true | (deltaLastStep >= 500)){
+			My8080.emulateCycle();
+			++steps;
+			//My8080.printState();
+			//printf("step! %i\n", ++grossSteps);
+			deltaLastStep -= 500;
+		}
+		if(deltaLastDraw >= 16666666){
+			//VBL time
+			drawGraphics(My8080);
+			// VBL
+			//My8080.dataBus = 0xCF;
+			//My8080.signalInt();
+		} else if(deltaLastDraw > 8333333){
+			// ISR
+			//My8080.dataBus = 0xD7;
+			//My8080.signalInt();
+		}
+		
+		// Timer stuff
+		cycleEnd = std::chrono::high_resolution_clock::now();
+		cycleTime = std::chrono::duration_cast<std::chrono::nanoseconds>(cycleEnd - cycleStart);
+		printf("Cycletime: %d\n", cycleTime.count());
+		deltaLastStep += cycleTime.count();
+		netCyclens += cycleTime.count();
+		if(netCyclens > 1000000000){
+			printf("Step completed this cycle: %d\n", steps);
+			steps = 0;
+			netCyclens = 0;
+		}
+		if(deltaLastDraw >= 16666666){
+		} else {
+			deltaLastDraw += cycleTime.count();
+		}
 	}
 	close();	
 	return 0;
@@ -295,7 +298,7 @@ bool setupGraphics(){
 
 void drawGraphics(i8080 system){
 	
-	//printf("Draw graphics \n");
+	///printf("Draw graphics \n");
 	/*
 	drawStart = std::chrono::high_resolution_clock::now();
 	*/	
@@ -306,7 +309,7 @@ void drawGraphics(i8080 system){
 
 	SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x02, 0x70, 0xFF);
 	
-	// new draw
+	// Game draw
 	for(int y=0;y<256;y+=8){
 		for(int x=0;x<224;++x){
 			//printf("Accessing %d, %d = %d\n", x, y, (32*x+0x241F-y/8));
@@ -331,8 +334,6 @@ void drawGraphics(i8080 system){
 	text[8]='O';text[9]='P';text[10]=':';emplaceDataInArray(text,11,system.fetchReg('O'));text[13]=' ';
 	text[14]='S';text[15]='P';text[16]=':';emplaceDataInArray(text,17,system.fetchRegPair('S'));text[21]=' ';
 
-	//text[8]={'q','w'};
-	//emplaceDataInArray(text, 8,'q');
 	const char registerArray[8] = {'A', 'B', 'C', 'D', 'E', 'H', 'L', 'P'};
 	for(int i = 0; i < 8; ++i){
 		uint8_t offset = i * 5 + 22;
@@ -342,14 +343,6 @@ void drawGraphics(i8080 system){
 		text[offset+4]=' ';
 	}
 	text[22+5*8] = '\0';
-//   text[24]='A';text[25]=':';emplaceDataInArray(text, 26, system.fetchReg('A'));text[28]=' ';
-//   text[29]='B';text[30]=':';emplaceDataInArray(text, 31, system.fetchReg('B'));text[33]=' ';
-//   text[34]='C';text[35]=':';emplaceDataInArray(text, 28, system.fetchReg('C'));text[38]=' ';
-//   text[39]='D';text[40]=':';emplaceDataInArray(text, 33, system.fetchReg('D'));text[43]=' ';
-//   text[44]='E';text[45]=':';emplaceDataInArray(text, 38, system.fetchReg('E'));text[48]=' ';
-//   text[49]='H';text[50]=':';emplaceDataInArray(text, 43, system.fetchReg('H'));text[53]=' ';
-//   text[54]='L';text[55]=':';emplaceDataInArray(text, 48, system.fetchReg('L'));text[58]=' ';
-//   text[59]='P';text[60]=':';emplaceDataInArray(text, 53, system.fetchReg('P'));text[63]='\0';
 
 
 	surfaceMessage = TTF_RenderText_Solid(font, text, fontColour);
@@ -444,7 +437,7 @@ void drawGraphics(i8080 system){
 	
 	/*
 	drawEnd = std::chrono::high_resolution_clock::now();
-	drawTime = std::chrono::duration_cast<std::chrono::duration<double>>(drawEnd - drawStart);
+	drawTime = std::chrono::duration_cast<std::chrono::duration<int>>(drawEnd - drawStart);
 	printf("Draw time: %f ms\n", (1000 * drawTime.count()) );
 	*/
 }
