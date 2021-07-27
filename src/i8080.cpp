@@ -13,8 +13,9 @@ i8080::i8080(){
 
 	opcode = opcodeCycleCount = 0;	
 
-	port1 = 0x10;
-	port2 = 0x80;
+	port1 = 0x00;
+	//port2 = 0x80;
+	port2 = 0x00;
 }
 
 i8080::~i8080(){
@@ -57,16 +58,17 @@ bool i8080::loadROM(const char* path){
 
 void i8080::emulateCycle(){
 	if(INT & INTE){
-		INT = false;
+		INT = INTE = false;
 		writeMem( (SP-1), (PC & 0xFF00) >> 8);
 		writeMem( (SP-2), (PC & 0x00FF));
 		SP -= 2;
-		(this->*opcodeArray[dataBus])();
+		//printf("interrupt, jumping to: %d\n", dataBus);
+		PC = dataBus;
 	}
-	if(true | opcodeCycleCount <= 0 & !hold){
+	if(opcodeCycleCount <= 0 & !hold){
 		opcode = memory[PC];
-		//printf("PC: %X | OP: %X\n",PC, opcode);
 		(this->*opcodeArray[opcode])();
+		//printf("PC: %X | OP: %X\n",PC, opcode);
 	}
 	opcodeCycleCount -= 1;
 }
@@ -1124,7 +1126,6 @@ void i8080::JNC(){
 
 // 0xD3 | XXX special
 void i8080::OUT(){
-	printf("OUT unimplemented!\n");
 	uint8_t port = memory[PC+1];
 	switch(port){
 	case(2):
@@ -1141,7 +1142,7 @@ void i8080::OUT(){
 		printf("sound %d\n", A);
 		break;
 	case(6):
-		printf("debug, unused, panic if seen\n");
+		// watchdog, not required for space invaders
 		break;
 	}
 	PC += 2;
@@ -1185,9 +1186,8 @@ void i8080::JC(){
 	JUMP(flags.CY);
 }
 
-// 0xDB | XXX SPECIAL
+// 0xDB | IN, read data from bus in reg A
 void i8080::IN(){
-	printf("IN unimplemented!\n");
 	uint8_t port = memory[PC+1];
 	switch(port){
 	case(1):
@@ -1241,11 +1241,12 @@ void i8080::JPO(){
 	JUMP(flags.P == 0);
 }
 
-// 0xE3 | exchange HL and SP
-// L <-> SP | H <-> SP+1
+// 0xE3 | exchange HL and SP data
+// L <-> (SP) | H <-> (SP+1)
 void i8080::XTHL(){
 	uint16_t stackContents = (memory[SP+1] << 8) | memory[SP];
-	SP = (H << 8) | L;
+	writeMem(SP, L);
+	writeMem(SP+1, H);
 	writeRegisterPair('H', stackContents);
 	PC += 1;
 	opcodeCycleCount = 18;
@@ -1329,7 +1330,8 @@ void i8080::RP(){
 
 // 0xF1 | pops A and flags  off of stack
 void i8080::POPPSW(){
-	uint16_t data = POP();
+	uint16_t data = (memory[SP + 1] << 8) | memory[SP];
+	SP += 2;
 	A = (data >> 8);
 	writePSW(data & 0x00FF);
 	PC += 1;
@@ -1341,7 +1343,7 @@ void i8080::JP(){
 	JUMP(flags.S == false);
 }
 
-// 0xF3 | XXX special
+// 0xF3 | Disable Interrupts
 void i8080::DI(){
 	INTE = false;
 	PC += 1;
@@ -1391,7 +1393,7 @@ void i8080::JM(){
 	JUMP(flags.S == true);
 }
 
-// 0xFB | XXX special
+// 0xFB | Enable Interrrupts
 void i8080::EI(){
 	INTE = true;
 	PC += 1;

@@ -2,15 +2,12 @@ mem rendering:
 	- make each line its own rect, might make optomising easy
 	- 0xF or 0x20 entries wide
 
-cycle timing may need checking
-	- draw timers nested instead of being seperate?
-	- cycletime inluding drawing good?
-
 Drawing:
 	dont clear screen, as RAM changes rarely?
+	draw blocking elements for game/RAM, allowing '~120Hz' for game
+	have seperate calls to update upper and lower halves?
 	draw pixels to a surface for game rendering?
 	text array recreated each frame?
-	text[8]=q?
 
 .h
 	memory is array, not portable (but who cares)
@@ -22,6 +19,23 @@ ADD not affectign AC?
 0x76 HLT not implemented
 sub and SBB carry weirdness | check if  simple uint16 sub cant be used
 sign-extension and all that
+f1 use POP, but not increment PC itself
 
-changes made this version:
--POPPSW was assigning reg A and PSW wrong order
+
+=========
+i8080:
+
+constructor: port1 and port2 altered, to automatically start the demo
+emulatecycle(): altered how interrupts are processed
+0xD3 OUT(): removed print statements, as watchdog not an implemented feature
+0xDB IN(): altered description
+0xE3 XTHL(): was overwriting SP, and not storing on stack
+0xF1 POPPSW(): using POP meant PC over-incremented
+0xF3 DI(): rewrote decripting commnet, as has been implemented
+
+main.cpp:
+added game emulation speed multiplier (float gameSpeed)
+redid main.cpp's calls for emulate cycle, not does 1/120th second batches (was performing at 26x real speed)
+deciding window size is now performed during setupGraphics()
+the game is now drawn in upper and lower halves, to match theCRT with interrupt nature of the actual cabinate
+checkPCBreakpoint(): is intended to act as a breakpoint, halting execution when a specific PC is set, unused and may not work well

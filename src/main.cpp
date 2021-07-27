@@ -7,21 +7,21 @@
 
 // Emulation settings
 bool autostep = false;
+float gameSpeed = 1.0;
+int frameNumber = 0;
 unsigned int deltaLastStep;
 unsigned int cyclens;
 unsigned int netCyclens;
 
 // Window settings
+const bool drawRam = true;
 const uint8_t gameScale = 2;
 const int gameWidth = 224 * gameScale;
 const int gameHeight = 256 * gameScale;
+int width = gameWidth;
+int height = gameHeight;
 const int ramWidth = 800;
 const int ramHeight = 640;
-const int width = gameWidth + ramWidth;
-const int height = (gameHeight > ramHeight)?gameHeight:ramHeight;
-//const int width = 1056;
-//const int height = 640;
-
 //RAM drawing settings
 int8_t ramPage = 0;
 uint8_t rowCount = 32;
@@ -55,8 +55,11 @@ SDL_Color fontColour;
 SDL_Surface* surfaceMessage;
 SDL_Texture* message;
 
+bool checkPCBreakpoint(i8080);
 bool setupGraphics();
 void drawGraphics(i8080);
+enum screenHalf { upper, lower };
+void drawGameHalf(i8080, screenHalf);
 template<typename T>
 void emplaceDataInArray(char*, int, T);
 void close();
@@ -71,6 +74,7 @@ int main(int argc, char** argv){
 		My8080.loadROM(romname);
 	}
 	if(!setupGraphics()){return -1;}
+	screenHalf drawHalf = upper;
 	pageElementCount = rowCount * colCount;
 	printf("Setup done!\n");
 
@@ -225,45 +229,102 @@ int main(int argc, char** argv){
 				}
 			}
 		} // end input processing
-	
-		if(autostep && true | (deltaLastStep >= 500)){
-			My8080.emulateCycle();
-			++steps;
-			//My8080.printState();
-			//printf("step! %i\n", ++grossSteps);
-			deltaLastStep -= 500;
-		}
-		if(deltaLastDraw >= 16666666){
-			//VBL time
+		if(deltaLastStep > (16666666/gameSpeed) && autostep){ // 1/60th of a second
+			deltaLastStep = 0;
+			frameNumber++;
+
+			for(int i = 0; i < 16666; ++i){
+				My8080.emulateCycle();
+				if(checkPCBreakpoint(My8080)){
+					break;
+				}
+				++steps;
+			}
+			drawHalf = upper;
+			drawGameHalf(My8080, drawHalf); 
+			My8080.dataBus = 0x08;
+			My8080.signalInt();
+
+			for(int i = 0; i < 16667; ++i){
+				My8080.emulateCycle();
+				if(checkPCBreakpoint(My8080)){
+					break;
+				}
+				++steps;
+			}
+			drawHalf = lower;
+			drawGameHalf(My8080, drawHalf); 
 			drawGraphics(My8080);
-			// VBL
-			//My8080.dataBus = 0xCF;
-			//My8080.signalInt();
-		} else if(deltaLastDraw > 8333333){
-			// ISR
-			//My8080.dataBus = 0xD7;
-			//My8080.signalInt();
+			My8080.dataBus = 0x10;
+			My8080.signalInt();
 		}
+			
 		
 		// Timer stuff
 		cycleEnd = std::chrono::high_resolution_clock::now();
 		cycleTime = std::chrono::duration_cast<std::chrono::nanoseconds>(cycleEnd - cycleStart);
-		printf("Cycletime: %d\n", cycleTime.count());
+		//printf("Cycletime: %d\n", cycleTime.count());
 		deltaLastStep += cycleTime.count();
 		netCyclens += cycleTime.count();
-		if(netCyclens > 1000000000){
-			printf("Step completed this cycle: %d\n", steps);
+		if(netCyclens > (1000000000/gameSpeed)){
+			//account for 16666.66666 being an even division of cycles 
+			// (2MHz / 60FPS / 2 interrupts
+			if(autostep){
+				for(int i=0;i<20;i++){
+					My8080.emulateCycle();
+					if(checkPCBreakpoint(My8080)){
+						break;
+					}
+					++steps;
+				}	
+			}
+			//printf("Step completed this cycle: %d\n", steps);
 			steps = 0;
 			netCyclens = 0;
+			frameNumber = 0;
 		}
-		if(deltaLastDraw >= 16666666){
-		} else {
-			deltaLastDraw += cycleTime.count();
-		}
-	}
+
+	} // end of while loop
 	close();	
 	return 0;
 	
+}
+
+bool checkPCBreakpoint(i8080 system){
+	return false;
+	uint16_t PC = system.fetchRegPair('P');
+	// we care about this
+	switch(PC){
+		case 0x0003:
+			printf("The Beginning\n");
+			autostep = false;
+			printf("\n ===Breakpoint!=== \n");
+			system.printState();
+			return true;
+		case 0x191A:
+			printf("Begin DrawScorHead\n");
+			autostep = false;
+			printf("\n ===Breakpoint!=== \n");
+			system.printState();
+			return true;
+			break;	
+		case 0x1925:
+			printf("Begin p1 score\n");
+			autostep = false;
+			printf("\n ===Breakpoint!=== \n");
+			system.printState();
+			return true;
+			break;
+		case 0x192B:
+			printf("Begin p2 score\n");
+			autostep = false;
+			printf("\n ===Breakpoint!=== \n");
+			system.printState();
+			return true;
+			break;
+		default:
+			return false;
+	}
 }
 
 bool setupGraphics(){
@@ -273,6 +334,10 @@ bool setupGraphics(){
 		printf("Could not initialise SDL: %S\n", SDL_GetError());
 		success = false;
 	} else { 
+		if(drawRam){
+		   width = gameWidth + ramWidth;
+		   height = (gameHeight > ramHeight)?gameHeight:ramHeight;
+		}	
 		gWindow = SDL_CreateWindow("Space Invaders", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_SHOWN);
 		if(gWindow == NULL){
 			printf("Could not create window: %S\n", SDL_GetError());
@@ -298,11 +363,11 @@ bool setupGraphics(){
 
 void drawGraphics(i8080 system){
 	
-	///printf("Draw graphics \n");
 	/*
 	drawStart = std::chrono::high_resolution_clock::now();
 	*/	
 
+	/*
 	// reset screen
 	SDL_SetRenderDrawColor(gRenderer, 0x20, 0x20, 0x20, 0xFF);
 	SDL_RenderClear(gRenderer);
@@ -323,7 +388,8 @@ void drawGraphics(i8080 system){
 			}
 		}
 	}
-	
+	*/
+	if(drawRam){
 	char text[6 + 2 + (3 * colCount)];
 	text[(sizeof(text)/sizeof(text[0]))] = '\0';
 
@@ -431,7 +497,7 @@ void drawGraphics(i8080 system){
 		SDL_DestroyTexture(message);
 
 	}
-
+	}
 
 	SDL_RenderPresent(gRenderer);
 	
@@ -440,6 +506,34 @@ void drawGraphics(i8080 system){
 	drawTime = std::chrono::duration_cast<std::chrono::duration<int>>(drawEnd - drawStart);
 	printf("Draw time: %f ms\n", (1000 * drawTime.count()) );
 	*/
+}
+
+void drawGameHalf(i8080 system, screenHalf sideToDraw){
+	int offset = 0;
+	if(sideToDraw == upper){
+		offset = 0;
+		// reset screen
+		SDL_SetRenderDrawColor(gRenderer, 0x20, 0x20, 0x20, 0xFF);
+		SDL_RenderClear(gRenderer);
+	} else {
+		offset = 128;
+	}	
+
+	SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x02, 0x70, 0xFF);
+	// Game draw
+	for(int y=0+offset;y<128+offset;y+=8){
+		for(int x=0;x<224;++x){
+			//printf("Accessing %d, %d = %d\n", x, y, (32*x+0x241F-y/8));
+			uint8_t pixelCol = system.fetchGFXPixel( (32*x+0x241F-y/8));
+			for(uint8_t shift = 0; shift < 8; ++shift){
+				if(pixelCol & (0x80 >> shift)){
+					pixel.x = x * gameScale;
+					pixel.y = (y+shift) * gameScale;
+					SDL_RenderFillRect(gRenderer, &pixel);
+				}
+			}
+		}
+	}
 }
 
 template<typename T>
