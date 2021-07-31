@@ -8,10 +8,6 @@
 // Emulation settings
 bool autostep = false;
 float gameSpeed = 1.0;
-int frameNumber = 0;
-unsigned int deltaLastStep;
-unsigned int cyclens;
-unsigned int netCyclens;
 
 // Window settings
 const bool drawRam = true;
@@ -36,11 +32,14 @@ SDL_Rect pixel = {0, 0, gameScale, gameScale};
 int sWidth;
 int sHeight;
 unsigned int steps = 0;
-unsigned int grossSteps = 0;
+unsigned int stepsToRun = 0;
+unsigned int deltaLastStep;
+unsigned int frameNumber = 1;
 
 std::chrono::high_resolution_clock::time_point cycleStart;
 std::chrono::high_resolution_clock::time_point cycleEnd;
 std::chrono::nanoseconds cycleTime;
+unsigned int netCyclens;
 std::chrono::high_resolution_clock::time_point drawStart;
 std::chrono::high_resolution_clock::time_point drawEnd;
 std::chrono::nanoseconds drawTime;
@@ -75,6 +74,7 @@ int main(int argc, char** argv){
 	}
 	if(!setupGraphics()){return -1;}
 	screenHalf drawHalf = upper;
+	drawGraphics(My8080);//initial window fill-in
 	pageElementCount = rowCount * colCount;
 	printf("Setup done!\n");
 
@@ -89,26 +89,20 @@ int main(int argc, char** argv){
 			} else if (e.type == SDL_KEYDOWN){
 				switch(e.key.keysym.sym){
 
-				case(SDLK_SPACE):
-					My8080.emulateCycle();
-					printf("step! %i\n", ++grossSteps);
-					break;
 				case(SDLK_p):
 					My8080.printState();
 					break;
-				case(SDLK_g):
-					for(int i=0;i<10;++i){
-						My8080.emulateCycle();
-						printf("step! %i\n", ++grossSteps);
-						//My8080.printState();
-					}
+				case(SDLK_v):
+					stepsToRun += 1;
 					break;
-				case(SDLK_f):
-					for(int i=0;i<100;++i){
-						My8080.emulateCycle();
-						printf("step! %i\n", ++grossSteps);
-						//My8080.printState();
-					}
+				case(SDLK_b):
+					stepsToRun += 10;
+					break;
+				case(SDLK_n):
+					stepsToRun += 100;
+					break;
+				case(SDLK_m):
+					stepsToRun += 1000;
 					break;
 				case(SDLK_o):
 					autostep = !autostep;
@@ -138,7 +132,7 @@ int main(int argc, char** argv){
 					My8080.port1 = My8080.port1 | 0x04;
 					break;
 				// 0x08 unused
-				case(SDLK_z): //p1 shoot
+				case(SDLK_SPACE): //p1 shoot
 					My8080.port1 = My8080.port1 | 0x10;
 					break;
 				case(SDLK_LEFT): //p1 left
@@ -190,7 +184,7 @@ int main(int argc, char** argv){
 						My8080.port1 = My8080.port1 ^ 0x04;
 						break;
 					// 0x08 unused
-					case(SDLK_z): //p1 shoot
+					case(SDLK_SPACE): //p1 shoot
 						My8080.port1 = My8080.port1 ^ 0x10;
 						break;
 					case(SDLK_LEFT): //p1 left
@@ -229,60 +223,62 @@ int main(int argc, char** argv){
 				}
 			}
 		} // end input processing
-		if(deltaLastStep > (16666666/gameSpeed) && autostep){ // 1/60th of a second
-			deltaLastStep = 0;
-			frameNumber++;
 
-			for(int i = 0; i < 16666; ++i){
-				My8080.emulateCycle();
-				if(checkPCBreakpoint(My8080)){
-					break;
-				}
-				++steps;
-			}
-			drawHalf = upper;
-			drawGameHalf(My8080, drawHalf); 
-			My8080.dataBus = 0x08;
-			My8080.signalInt();
+		while(stepsToRun > 0){
+			stepsToRun--;
+			My8080.emulateCycle();
+			steps++;
 
-			for(int i = 0; i < 16667; ++i){
-				My8080.emulateCycle();
-				if(checkPCBreakpoint(My8080)){
-					break;
-				}
-				++steps;
+			// check if interrupts / drawing needs to happen
+			switch(steps){
+	
+			// mid-screen interrupt
+			case 16666:
+				My8080.dataBus = 0x08;	
+				My8080.signalInt();
+				drawHalf = upper;
+				drawGameHalf(My8080, drawHalf); 
+				break;
+			// end of screen interrupt
+			case 33333:
+				My8080.dataBus = 0x10;	
+				My8080.signalInt();
+				steps = 1;
+				frameNumber++;
+				drawHalf = lower;
+				drawGameHalf(My8080, drawHalf); 
+				drawGraphics(My8080);
+				break;
 			}
-			drawHalf = lower;
-			drawGameHalf(My8080, drawHalf); 
-			drawGraphics(My8080);
-			My8080.dataBus = 0x10;
-			My8080.signalInt();
+			// ensures that when manually stepping, visual will update
+			// low value check on stepsToRun prevents slowdown with high sTR values
+			if(!autostep && stepsToRun < 5){
+				drawHalf = upper;
+				drawGameHalf(My8080, drawHalf);
+				drawHalf = lower;
+				drawGameHalf(My8080, drawHalf);
+				drawGraphics(My8080);
+			}
 		}
-			
 		
+		//account for 16666.66666 being an even division of cycles 
+		// (2MHz / 60FPS / 2 interrupts
+		if(frameNumber == 60){
+			for(int i=0;i<20;i++){
+				My8080.emulateCycle();
+			}	
+			steps = 1;
+			frameNumber = 1;
+		}
+
 		// Timer stuff
 		cycleEnd = std::chrono::high_resolution_clock::now();
 		cycleTime = std::chrono::duration_cast<std::chrono::nanoseconds>(cycleEnd - cycleStart);
 		//printf("Cycletime: %d\n", cycleTime.count());
 		deltaLastStep += cycleTime.count();
-		netCyclens += cycleTime.count();
-		if(netCyclens > (1000000000/gameSpeed)){
-			//account for 16666.66666 being an even division of cycles 
-			// (2MHz / 60FPS / 2 interrupts
-			if(autostep){
-				for(int i=0;i<20;i++){
-					My8080.emulateCycle();
-					if(checkPCBreakpoint(My8080)){
-						break;
-					}
-					++steps;
-				}	
-			}
-			//printf("Step completed this cycle: %d\n", steps);
-			steps = 0;
-			netCyclens = 0;
-			frameNumber = 0;
-		}
+		if(autostep && deltaLastStep >= (16666666/gameSpeed) ){
+			stepsToRun += 33333;
+		} 
 
 	} // end of while loop
 	close();	
@@ -363,32 +359,6 @@ bool setupGraphics(){
 
 void drawGraphics(i8080 system){
 	
-	/*
-	drawStart = std::chrono::high_resolution_clock::now();
-	*/	
-
-	/*
-	// reset screen
-	SDL_SetRenderDrawColor(gRenderer, 0x20, 0x20, 0x20, 0xFF);
-	SDL_RenderClear(gRenderer);
-
-	SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x02, 0x70, 0xFF);
-	
-	// Game draw
-	for(int y=0;y<256;y+=8){
-		for(int x=0;x<224;++x){
-			//printf("Accessing %d, %d = %d\n", x, y, (32*x+0x241F-y/8));
-			uint8_t pixelCol = system.fetchGFXPixel( (32*x+0x241F-y/8));
-			for(uint8_t shift = 0; shift < 8; ++shift){
-				if(pixelCol & (0x80 >> shift)){
-					pixel.x = x * gameScale;
-					pixel.y = (y+shift) * gameScale;
-					SDL_RenderFillRect(gRenderer, &pixel);
-				}
-			}
-		}
-	}
-	*/
 	if(drawRam){
 	char text[6 + 2 + (3 * colCount)];
 	text[(sizeof(text)/sizeof(text[0]))] = '\0';

@@ -57,7 +57,7 @@ bool i8080::loadROM(const char* path){
 }
 
 void i8080::emulateCycle(){
-	if(INT & INTE){
+	if(INT){
 		INT = INTE = false;
 		writeMem( (SP-1), (PC & 0xFF00) >> 8);
 		writeMem( (SP-2), (PC & 0x00FF));
@@ -74,7 +74,9 @@ void i8080::emulateCycle(){
 }
 
 void i8080::signalInt(){
-	INT = true;
+	if(INTE){
+		INT = true;
+	}
 }
 
 
@@ -1132,14 +1134,14 @@ void i8080::OUT(){
 		bitShifterAmount = A;
 		break;
 	case(3):
-		printf("sound! %d\n", A);
+		//printf("sound! %d\n", A);
 		break;
 	case(4):
 		bitShifter >> 8;
 		bitShifter &= (A << 8);
 		break;
 	case(5):
-		printf("sound %d\n", A);
+		//printf("sound %d\n", A);
 		break;
 	case(6):
 		// watchdog, not required for space invaders
