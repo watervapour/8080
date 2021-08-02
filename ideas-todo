@@ -21,21 +21,6 @@ sub and SBB carry weirdness | check if  simple uint16 sub cant be used
 sign-extension and all that
 f1 use POP, but not increment PC itself
 
+confirm shift register working correctly
+1980400 is good start point for JS emu
 
-=========
-i8080:
-
-constructor: port1 and port2 altered, to automatically start the demo
-emulatecycle(): altered how interrupts are processed
-0xD3 OUT(): removed print statements, as watchdog not an implemented feature
-0xDB IN(): altered description
-0xE3 XTHL(): was overwriting SP, and not storing on stack
-0xF1 POPPSW(): using POP meant PC over-incremented
-0xF3 DI(): rewrote decripting commnet, as has been implemented
-
-main.cpp:
-added game emulation speed multiplier (float gameSpeed)
-redid main.cpp's calls for emulate cycle, not does 1/120th second batches (was performing at 26x real speed)
-deciding window size is now performed during setupGraphics()
-the game is now drawn in upper and lower halves, to match theCRT with interrupt nature of the actual cabinate
-checkPCBreakpoint(): is intended to act as a breakpoint, halting execution when a specific PC is set, unused and may not work well

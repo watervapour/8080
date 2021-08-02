@@ -1126,19 +1126,21 @@ void i8080::JNC(){
 	JUMP(flags.CY == false);
 }
 
-// 0xD3 | XXX special
+// 0xD3 | Outputs data, technically on data bus, but we only care about shifts
 void i8080::OUT(){
 	uint8_t port = memory[PC+1];
 	switch(port){
 	case(2):
+		//printf("out(2) shiftreg = %X, shiftamnt = %d\n", bitShifter, bitShifterAmount);
 		bitShifterAmount = A;
 		break;
 	case(3):
 		//printf("sound! %d\n", A);
 		break;
 	case(4):
-		bitShifter >> 8;
-		bitShifter &= (A << 8);
+		bitShifter = bitShifter >> 8;
+		bitShifter |= (A << 8);
+		//printf("out(4) A=%X,  shiftreg = %X, shiftamnt = %d\n", A, bitShifter, bitShifterAmount);
 		break;
 	case(5):
 		//printf("sound %d\n", A);
@@ -1199,7 +1201,8 @@ void i8080::IN(){
 		A = port2;
 		break;
 	case(3):
-		A = bitShifter & (0xFF >> bitShifterAmount) >> (8-bitShifterAmount);
+		A = (bitShifter & (0xFF00 >> bitShifterAmount)) >> (8-bitShifterAmount);
+		//printf("IN(3) shiftreg = %X, shiftamnt = %d, A = %X\n", bitShifter, bitShifterAmount, A);
 		break;
 	}
 	PC += 2;

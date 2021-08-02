@@ -55,6 +55,8 @@ SDL_Surface* surfaceMessage;
 SDL_Texture* message;
 
 bool checkPCBreakpoint(i8080);
+int minPCIndex = 0;
+uint16_t pcBreaks[4] = {0x0000, 0x0000, 0x0000, 0x0000};
 bool setupGraphics();
 void drawGraphics(i8080);
 enum screenHalf { upper, lower };
@@ -225,6 +227,12 @@ int main(int argc, char** argv){
 		} // end input processing
 
 		while(stepsToRun > 0){
+			if(checkPCBreakpoint(My8080)){
+				minPCIndex++;
+				stepsToRun = 0;
+				autostep = false;
+				break;
+			}
 			stepsToRun--;
 			My8080.emulateCycle();
 			steps++;
@@ -263,7 +271,7 @@ int main(int argc, char** argv){
 		
 		//account for 16666.66666 being an even division of cycles 
 		// (2MHz / 60FPS / 2 interrupts
-		if(frameNumber == 60){
+		if(frameNumber == 60 && steps == 33333){
 			for(int i=0;i<20;i++){
 				My8080.emulateCycle();
 			}	
@@ -278,6 +286,7 @@ int main(int argc, char** argv){
 		deltaLastStep += cycleTime.count();
 		if(autostep && deltaLastStep >= (16666666/gameSpeed) ){
 			stepsToRun += 33333;
+			deltaLastStep = 0;
 		} 
 
 	} // end of while loop
@@ -287,40 +296,15 @@ int main(int argc, char** argv){
 }
 
 bool checkPCBreakpoint(i8080 system){
-	return false;
 	uint16_t PC = system.fetchRegPair('P');
-	// we care about this
-	switch(PC){
-		case 0x0003:
-			printf("The Beginning\n");
-			autostep = false;
+	for(int i = minPCIndex; i < 4; i++){
+		if(PC == pcBreaks[i]){
 			printf("\n ===Breakpoint!=== \n");
 			system.printState();
 			return true;
-		case 0x191A:
-			printf("Begin DrawScorHead\n");
-			autostep = false;
-			printf("\n ===Breakpoint!=== \n");
-			system.printState();
-			return true;
-			break;	
-		case 0x1925:
-			printf("Begin p1 score\n");
-			autostep = false;
-			printf("\n ===Breakpoint!=== \n");
-			system.printState();
-			return true;
-			break;
-		case 0x192B:
-			printf("Begin p2 score\n");
-			autostep = false;
-			printf("\n ===Breakpoint!=== \n");
-			system.printState();
-			return true;
-			break;
-		default:
-			return false;
+		}
 	}
+	return false;
 }
 
 bool setupGraphics(){
